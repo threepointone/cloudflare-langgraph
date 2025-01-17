@@ -1,0 +1,14 @@
+{
+  "name": "@examples/durable-object",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@langchain/langgraph": "^0.2.40",
+    "wrangler": "^3.103.2"
+  }
+}
