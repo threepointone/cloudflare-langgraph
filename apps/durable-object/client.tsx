@@ -2,15 +2,7 @@ import { createRoot } from "react-dom/client";
 import { usePartySocket } from "partysocket/react";
 
 import * as d3 from "d3";
-// ----------ATTENTION----------
-// If attempting to run this notebook locally, you must follow these instructions
-// to install the necessary system dependencies for the `canvas` package.
-// https://www.npmjs.com/package/canvas#compiling
-// -----------------------------
-
-import { z } from "zod";
 import { useRef } from "react";
-// import * as tslab from "tslab";
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
