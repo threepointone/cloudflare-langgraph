@@ -1,117 +1,105 @@
-import { CloudflareDurableObjectSqliteSaver } from './cf-sqlite';
-import { workflow } from './langgraph';
-import { DurableObject } from 'cloudflare:workers';
+import { CloudflareDurableObjectSqliteSaver } from "./cf-sqlite";
+import { workflow } from "./multi-agent";
+import { Server, routePartykitRequest, Connection } from "partyserver";
+import { HumanMessage } from "@langchain/core/messages";
+type Env = {
+  Agent: DurableObjectNamespace<Agent>;
+};
 
-interface Env {
-  ExampleDurableObject: DurableObjectNamespace<ExampleDurableObject>;
-}
+import { context } from "./context";
 
-interface SomeState {
-  app?: any;
-  checkpointer?: CloudflareDurableObjectSqliteSaver;
-}
+const prettifyOutput = (output: Record<string, any>) => {
+  const keys = Object.keys(output);
+  const firstItem = output[keys[0]];
 
-export class ExampleDurableObject extends DurableObject<Env> {
+  if ("messages" in firstItem && Array.isArray(firstItem.messages)) {
+    const lastMessage = firstItem.messages[firstItem.messages.length - 1];
+    console.dir(
+      {
+        type: lastMessage._getType(),
+        content: lastMessage.content,
+        tool_calls: lastMessage.tool_calls,
+      },
+      { depth: null }
+    );
+  }
+
+  if ("sender" in firstItem) {
+    console.log({
+      sender: firstItem.sender,
+    });
+  }
+};
+
+export class Agent extends Server<Env> {
   static options = {
     // Hibernate the DO when it's not in use
     hibernate: true,
   };
 
-  // create some internal state on the class
-  internalState: SomeState = {
-    app: undefined,
-    checkpointer: undefined,
-  };
+  started = false;
 
-  constructor(state: DurableObjectState, env: Env) {
-    super(state, env);
+  checkpointer = new CloudflareDurableObjectSqliteSaver(this.ctx.storage.sql);
 
-    this.internalState.checkpointer = new CloudflareDurableObjectSqliteSaver(this.ctx.storage.sql);
-    this.internalState.app = workflow.compile({ checkpointer: this.internalState.checkpointer });
+  app = workflow.compile({
+    checkpointer: this.checkpointer,
+  });
+
+  outputs: any[] = [];
+
+  onConnect(connection: Connection) {
+    connection.send(
+      JSON.stringify({
+        type: "initial",
+        outputs: this.outputs,
+      })
+    );
+    this.start();
   }
 
-  // requests via rpc are just functions
-  async helloWorld(): Promise<string> {
-    return 'hello world';
-  }
-
-  async runGraph(): Promise<string> {
-    const messages = [
-      { role: 'user', content: 'Hello, how can I help you today?' },
-      {
-        role: 'user',
-        content: 'heyyyy',
-      },
-    ];
-    try {
-      console.log('running graph');
-      console.log(this.internalState.app);
-      const finalState = await this.internalState.app?.invoke(
-        { messages },
-        { configurable: { thread_id: '42' } }
-      );
-      console.log(finalState);
-      return finalState.messages[finalState.messages.length - 1].content;
-    } catch (error) {
-      console.error(error);
-      throw error;
+  async start() {
+    if (this.started) {
+      return;
     }
-  }
 
-  async getMessages(): Promise<string> {
-    const messages = await this.internalState.checkpointer?.get({
-      configurable: {
-        thread_id: '42',
-      },
+    this.started = true;
+    // const ctx = context.getStore();
+    context.run({ do: this }, async () => {
+      const streamResults = await this.app.stream(
+        {
+          messages: [
+            new HumanMessage({
+              content:
+                "Generate a bar chart of the US gdp over the past 3 years.",
+            }),
+          ],
+        },
+        { recursionLimit: 150 }
+      );
+
+      for await (const output of streamResults) {
+        this.outputs.push(output);
+        if (!output?.__end__) {
+          prettifyOutput(output);
+          console.log("----");
+        }
+        this.broadcast(
+          JSON.stringify({
+            type: "update",
+            output,
+          })
+        );
+      }
     });
-    console.log(messages);
-    return JSON.stringify(messages);
   }
 }
 
 // TODO: add hono router here.
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-
-    // assume the path is /durable-object/<id>/<endpoint>
-    const path = url.pathname.split('/').filter(Boolean);
-
-    if (path.length === 0) {
-      return new Response('Hello from the worker durable-object');
-    }
-
-    if (path.length === 1 && path[0] === 'id') {
-      return new Response(env.ExampleDurableObject.newUniqueId().toString());
-    }
-
-    const id = path[1] ?? env.ExampleDurableObject.newUniqueId();
-
-    // /hello-world
-    if (path.length === 3 && path[2] === 'hello') {
-      const name = env.ExampleDurableObject.idFromName(id);
-      const stub = env.ExampleDurableObject.get(name);
-      const rpcResponse = await stub.helloWorld();
-
-      return new Response(rpcResponse);
-    }
-
-    if (path.length === 3 && path[2] === 'graph') {
-      const name = env.ExampleDurableObject.idFromName(id);
-      const stub = env.ExampleDurableObject.get(name);
-      const rpcResponse = await stub.runGraph();
-
-      return new Response(rpcResponse);
-    }
-
-    if (path.length === 3 && path[2] === 'messages') {
-      const name = env.ExampleDurableObject.idFromName(id);
-      const stub = env.ExampleDurableObject.get(name);
-      const rpcResponse = await stub.getMessages();
-
-      return new Response(rpcResponse);
-    }
-
-    return new Response('Not Found', { status: 404 });
+    return (
+      (await routePartykitRequest(request, env)) ||
+      new Response("Not Found", { status: 404 })
+    );
   },
 } satisfies ExportedHandler<Env>;

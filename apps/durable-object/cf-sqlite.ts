@@ -1,5 +1,5 @@
-import { SqlStorage } from '@cloudflare/workers-types';
-import type { RunnableConfig } from '@langchain/core/runnables';
+import { SqlStorage } from "@cloudflare/workers-types";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import {
   BaseCheckpointSaver,
   Checkpoint,
@@ -9,7 +9,7 @@ import {
   type PendingWrite,
   type SerializerProtocol,
   copyCheckpoint,
-} from '@langchain/langgraph-checkpoint';
+} from "@langchain/langgraph-checkpoint";
 
 interface CheckpointRow {
   checkpoint: string;
@@ -36,14 +36,10 @@ interface PendingSendColumn {
 }
 
 export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
-  db: SqlStorage;
+  protected isSetup: boolean = false;
 
-  protected isSetup: boolean;
-
-  constructor(db: SqlStorage, serde?: SerializerProtocol) {
+  constructor(public db: SqlStorage, serde?: SerializerProtocol) {
     super(serde);
-    this.db = db;
-    this.isSetup = false;
   }
 
   protected async setup(): Promise<void> {
@@ -78,8 +74,12 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
   }
 
   async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
-    await this.setup();
-    const { thread_id, checkpoint_ns = '', checkpoint_id } = config.configurable ?? {};
+    this.setup();
+    const {
+      thread_id,
+      checkpoint_ns = "",
+      checkpoint_id,
+    } = config.configurable ?? {};
 
     const sql = `
       SELECT
@@ -115,7 +115,7 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
       FROM checkpoints c
       WHERE c.thread_id = ?1 
       AND c.checkpoint_ns = ?2
-      ${checkpoint_id ? 'AND c.checkpoint_id = ?3' : ''}
+      ${checkpoint_id ? "AND c.checkpoint_id = ?3" : ""}
       ORDER BY c.checkpoint_id DESC
       LIMIT 1
     `;
@@ -143,22 +143,24 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
       finalConfig.configurable?.thread_id === undefined ||
       finalConfig.configurable?.checkpoint_id === undefined
     ) {
-      throw new Error('Missing thread_id or checkpoint_id');
+      throw new Error("Missing thread_id or checkpoint_id");
     }
 
     const pendingWrites = await Promise.all(
       (() => {
         try {
-          return JSON.parse(String(row.pending_writes || '[]')) as PendingWriteColumn[];
+          return JSON.parse(
+            String(row.pending_writes || "[]")
+          ) as PendingWriteColumn[];
         } catch (e) {
-          console.error('Failed to parse pending writes:', e);
+          console.error("Failed to parse pending writes:", e);
           return [];
         }
       })().map(async (write) => {
         return [
           write.task_id,
           write.channel,
-          await this.serde.loadsTyped(write.type ?? 'json', write.value ?? ''),
+          await this.serde.loadsTyped(write.type ?? "json", write.value ?? ""),
         ] as [string, string, unknown];
       })
     );
@@ -166,23 +168,28 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
     const pending_sends = await Promise.all(
       (() => {
         try {
-          return JSON.parse(String(row.pending_sends || '[]')) as PendingSendColumn[];
+          return JSON.parse(
+            String(row.pending_sends || "[]")
+          ) as PendingSendColumn[];
         } catch (e) {
-          console.error('Failed to parse pending sends:', e);
+          console.error("Failed to parse pending sends:", e);
           return [];
         }
-      })().map(async (send) => await this.serde.loadsTyped(send.type ?? 'json', send.value ?? ''))
+      })().map(
+        async (send) =>
+          await this.serde.loadsTyped(send.type ?? "json", send.value ?? "")
+      )
     );
 
     const checkpoint = {
-      ...(await this.serde.loadsTyped(row.type ?? 'json', row.checkpoint)),
+      ...(await this.serde.loadsTyped(row.type ?? "json", row.checkpoint)),
       pending_sends,
     } as Checkpoint;
 
     return {
       checkpoint,
       config: finalConfig,
-      metadata: await this.serde.loadsTyped(row.type ?? 'json', row.metadata),
+      metadata: await this.serde.loadsTyped(row.type ?? "json", row.metadata),
       parentConfig: row.parent_checkpoint_id
         ? {
             configurable: {
@@ -197,19 +204,23 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
   }
 
   // Example of modified write method
-  async putWrites(config: RunnableConfig, writes: PendingWrite[], taskId: string): Promise<void> {
+  async putWrites(
+    config: RunnableConfig,
+    writes: PendingWrite[],
+    taskId: string
+  ): Promise<void> {
     await this.setup();
 
     if (!config.configurable) {
-      throw new Error('Empty configuration supplied.');
+      throw new Error("Empty configuration supplied.");
     }
 
     if (!config.configurable?.thread_id) {
-      throw new Error('Missing thread_id field in config.configurable.');
+      throw new Error("Missing thread_id field in config.configurable.");
     }
 
     if (!config.configurable?.checkpoint_id) {
-      throw new Error('Missing checkpoint_id field in config.configurable.');
+      throw new Error("Missing checkpoint_id field in config.configurable.");
     }
 
     // Process writes sequentially since Cloudflare SQLite doesn't support transactions
@@ -221,7 +232,7 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
         (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value) 
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
         config.configurable.thread_id,
-        config.configurable.checkpoint_ns ?? '',
+        config.configurable.checkpoint_ns ?? "",
         config.configurable.checkpoint_id,
         taskId,
         idx,
@@ -239,7 +250,7 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
     await this.setup();
     const { limit, before, filter } = options ?? {};
     const thread_id = config.configurable?.thread_id;
-    const checkpoint_ns = config.configurable?.checkpoint_ns ?? '';
+    const checkpoint_ns = config.configurable?.checkpoint_ns ?? "";
 
     let sql = `
       SELECT
@@ -271,23 +282,23 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
     const params: (string | number)[] = [];
 
     if (thread_id) {
-      whereClause.push('thread_id = ?');
+      whereClause.push("thread_id = ?");
       params.push(thread_id);
     }
 
     if (checkpoint_ns !== undefined) {
-      whereClause.push('checkpoint_ns = ?');
+      whereClause.push("checkpoint_ns = ?");
       params.push(checkpoint_ns);
     }
 
     if (before?.configurable?.checkpoint_id) {
-      whereClause.push('checkpoint_id < ?');
+      whereClause.push("checkpoint_id < ?");
       params.push(before.configurable.checkpoint_id);
     }
 
     if (filter) {
       const sanitizedFilter = Object.entries(filter).filter(([key]) =>
-        ['source', 'step', 'writes', 'parents'].includes(key)
+        ["source", "step", "writes", "parents"].includes(key)
       );
 
       for (const [key, value] of sanitizedFilter) {
@@ -297,32 +308,41 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
     }
 
     if (whereClause.length > 0) {
-      sql += ` WHERE ${whereClause.join(' AND ')}`;
+      sql += ` WHERE ${whereClause.join(" AND ")}`;
     }
 
-    sql += ' ORDER BY checkpoint_id DESC';
+    sql += " ORDER BY checkpoint_id DESC";
 
     if (limit) {
       sql += ` LIMIT ${parseInt(String(limit), 10)}`;
     }
 
     const cursor = this.db.exec(sql, ...params);
-    const rows = Array.from(cursor, (row) => row.value as unknown as CheckpointRow);
+    const rows = Array.from(
+      cursor,
+      (row) => row.value as unknown as CheckpointRow
+    );
 
     for (const row of rows) {
       const pendingWrites = await Promise.all(
-        (JSON.parse(String(row.pending_writes || '[]')) as PendingWriteColumn[]).map(
-          async (write) => {
-            return [
-              write.task_id,
-              write.channel,
-              await this.serde.loadsTyped(write.type ?? 'json', write.value ?? ''),
-            ] as [string, string, unknown];
-          }
-        )
+        (
+          JSON.parse(String(row.pending_writes || "[]")) as PendingWriteColumn[]
+        ).map(async (write) => {
+          return [
+            write.task_id,
+            write.channel,
+            await this.serde.loadsTyped(
+              write.type ?? "json",
+              write.value ?? ""
+            ),
+          ] as [string, string, unknown];
+        })
       );
 
-      const checkpoint = await this.serde.loadsTyped(row.type ?? 'json', row.checkpoint);
+      const checkpoint = await this.serde.loadsTyped(
+        row.type ?? "json",
+        row.checkpoint
+      );
 
       yield {
         checkpoint,
@@ -333,7 +353,7 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
             checkpoint_id: row.checkpoint_id,
           },
         },
-        metadata: await this.serde.loadsTyped(row.type ?? 'json', row.metadata),
+        metadata: await this.serde.loadsTyped(row.type ?? "json", row.metadata),
         parentConfig: row.parent_checkpoint_id
           ? {
               configurable: {
@@ -356,26 +376,31 @@ export class CloudflareDurableObjectSqliteSaver extends BaseCheckpointSaver {
     await this.setup();
 
     if (!config.configurable) {
-      throw new Error('Empty configuration supplied.');
+      throw new Error("Empty configuration supplied.");
     }
 
     const thread_id = config.configurable?.thread_id;
-    const checkpoint_ns = config.configurable?.checkpoint_ns ?? '';
+    const checkpoint_ns = config.configurable?.checkpoint_ns ?? "";
     const parent_checkpoint_id = config.configurable?.checkpoint_id;
 
     if (!thread_id) {
-      throw new Error(`Missing "thread_id" field in passed "config.configurable".`);
+      throw new Error(
+        `Missing "thread_id" field in passed "config.configurable".`
+      );
     }
 
     // Create a copy of the checkpoint without pending_sends
     const preparedCheckpoint: Partial<Checkpoint> = copyCheckpoint(checkpoint);
     delete preparedCheckpoint.pending_sends;
 
-    const [type1, serializedCheckpoint] = this.serde.dumpsTyped(preparedCheckpoint);
+    const [type1, serializedCheckpoint] =
+      this.serde.dumpsTyped(preparedCheckpoint);
     const [type2, serializedMetadata] = this.serde.dumpsTyped(metadata);
 
     if (type1 !== type2) {
-      throw new Error('Failed to serialized checkpoint and metadata to the same type.');
+      throw new Error(
+        "Failed to serialized checkpoint and metadata to the same type."
+      );
     }
 
     this.db.exec(

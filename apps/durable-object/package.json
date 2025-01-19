@@ -4,11 +4,25 @@
   "private": true,
   "scripts": {
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
-    "cf-typegen": "wrangler types"
+    "dev": "wangler dev"
   },
   "dependencies": {
+    "@langchain/community": "^0.3.25",
     "@langchain/langgraph": "^0.2.40",
+    "@langchain/openai": "^0.3.17",
+    "d3": "^7.9.0",
+    "partyserver": "^0.0.59",
+    "partysocket": "^1.0.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "@types/d3": "^7.4.3",
+    "@types/node": "^22.10.7",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "wangler": "^0.0.7",
     "wrangler": "^3.103.2"
   }
 }
